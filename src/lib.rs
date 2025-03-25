@@ -352,7 +352,7 @@ mod tests {
 
 pub type Elements = Component;
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Component {
     pub html: String,
 }
