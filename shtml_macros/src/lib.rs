@@ -67,6 +67,7 @@ fn render(output: &mut Output, node: &Node) {
             }
         }
         Node::Element(n) => {
+
             let component_name = match &n.name() {
                 rstml::node::NodeName::Path(syn::ExprPath { path, .. }) => match path.get_ident() {
                     Some(ident) => match ident.to_string().get(0..1) {
@@ -78,9 +79,23 @@ fn render(output: &mut Output, node: &Node) {
                     },
                     None => todo!(),
                 },
-                rstml::node::NodeName::Punctuated(_) => todo!(),
+                rstml::node::NodeName::Punctuated(punctuated) => {
+                    let is_custom_element = punctuated.pairs().all(|pair| {
+                        match pair {
+                            syn::punctuated::Pair::Punctuated(_, p) => p.as_char() == '-',
+                            syn::punctuated::Pair::End(_) => true,
+                        }
+                    });
+
+                    if is_custom_element {
+                        None
+                    } else {
+                        todo!()
+                    }
+                },
                 rstml::node::NodeName::Block(_) => todo!(),
             };
+
             match component_name {
                 Some(fn_name) => {
                     let mut inputs = n
