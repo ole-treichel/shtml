@@ -69,15 +69,17 @@ fn render(output: &mut Output, node: &Node) {
         Node::Element(n) => {
 
             let component_name = match &n.name() {
-                rstml::node::NodeName::Path(syn::ExprPath { path, .. }) => match path.get_ident() {
-                    Some(ident) => match ident.to_string().get(0..1) {
-                        Some(first_letter) => match first_letter.to_uppercase() == first_letter {
-                            true => Some(ident),
-                            false => None,
+                rstml::node::NodeName::Path(syn::ExprPath { path, .. }) => {
+                    let last_segment = path.segments.last();
+                    match last_segment {
+                        Some(seg) => match seg.ident.to_string().get(0..1) {
+                            Some(first_letter) if first_letter.to_uppercase() == first_letter => {
+                                Some(path.clone())
+                            }
+                            _ => None,
                         },
                         None => None,
-                    },
-                    None => todo!(),
+                    }
                 },
                 rstml::node::NodeName::Punctuated(punctuated) => {
                     let is_custom_element = punctuated.pairs().all(|pair| {
@@ -102,18 +104,33 @@ fn render(output: &mut Output, node: &Node) {
                         .open_tag
                         .attributes
                         .iter()
-                        .map(|attr| match attr {
-                            rstml::node::NodeAttribute::Block(_) => todo!(),
+                        .filter_map(|attr| match attr {
+                            rstml::node::NodeAttribute::Block(block) => {
+                                match block {
+                                    rstml::node::NodeBlock::ValidBlock(valid_block) => {
+                                        for stmt in &valid_block.stmts {
+                                            if let syn::Stmt::Expr(syn::Expr::Range(expr_range), _) = stmt {
+                                                if let Some(box_expr) = &expr_range.end {
+                                                    let tokens = (*box_expr.clone()).to_token_stream();
+                                                    return Some(quote! { #tokens });
+                                                }
+                                            }
+                                        }
+                                        None
+                                    }
+                                    _ => None,
+                                }
+                            }
                             rstml::node::NodeAttribute::Attribute(attr) => {
                                 #[cfg(feature = "chaos")]
                                 let key = &attr.key;
                                 let value = attr.value();
 
                                 #[cfg(feature = "chaos")]
-                                quote! { #key: #value }
+                                { Some(quote! { #key: #value }) }
 
                                 #[cfg(not(feature = "chaos"))]
-                                quote! { #value }
+                                { Some(quote! { #value }) }
                             }
                         })
                         .collect::<Vec<_>>();

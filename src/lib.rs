@@ -348,6 +348,43 @@ mod tests {
 
         assert_eq!(result, r#"<div data-test="test">Test</div>"#);
     }
+
+    #[test]
+    fn it_works_with_bool_attributes() {
+        let result = html! { <input disabled/> }.to_string();
+        assert_eq!(result, r#"<input disabled/>"#);
+    }
+
+    #[test]
+    fn it_works_with_bool_and_value_attributes() {
+        let result = html! { <input type="text" disabled/> }.to_string();
+        assert_eq!(result, r#"<input type="text" disabled/>"#);
+    }
+
+    #[test]
+    fn it_works_with_module_path_components() {
+        mod components {
+            use super::*;
+            pub fn Card(elements: Elements) -> Component {
+                html! { <div class="card">{elements}</div> }
+            }
+        }
+
+        let result = html! { <components::Card><p>Hello</p></components::Card> }.to_string();
+        assert_eq!(result, r#"<div class="card"><p>Hello</p></div>"#);
+    }
+
+    #[test]
+    fn it_works_with_spread_attributes_on_components() {
+        fn Link(attrs: Vec<(String, String)>, elements: Elements) -> Component {
+            let href = attrs.iter().find(|(k, _)| k == "href").map(|(_, v)| v.as_str()).unwrap_or("");
+            html! { <a href=href>{elements}</a> }
+        }
+
+        let attrs = Vec::from([("href".to_string(), "/home".to_string())]);
+        let result = html! { <Link {..attrs}>Home</Link> }.to_string();
+        assert_eq!(result, r#"<a href="/home">Home</a>"#);
+    }
 }
 
 pub type Elements = Component;
