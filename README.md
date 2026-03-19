@@ -1,6 +1,8 @@
 # shtml
 
-shtml is a rust library for rendering html.
+Server-side HTML rendering for Rust using a JSX-like macro syntax. The s is silent.
+
+`shtml` is a `no_std` crate (using `alloc`) that lets you write HTML templates directly in Rust with the `html!` macro. It supports HTML elements, components, attributes, expressions, fragments, and automatic HTML escaping.
 
 ## Installation
 
@@ -8,125 +10,123 @@ shtml is a rust library for rendering html.
 cargo add --git https://github.com/swlkr/shtml shtml
 ```
 
-## Examples
-
-Just write or copy/paste plain old html
+## Quick start
 
 ```rust
-use shtml::{html, Elements, Component, Render};
+use shtml::{html, Component, Elements, Render};
 
-let result = html! {
+let page = html! {
     <!DOCTYPE html>
     <html lang="en">
-        <head></head>
-        <body>shtml the s is silent</body>
+        <head><title>My Page</title></head>
+        <body><h1>Hello, world!</h1></body>
     </html>
-}
-.to_string();
+};
+
+assert_eq!(
+    page.to_string(),
+    r#"<!DOCTYPE html><html lang="en"><head><title>My Page</title></head><body><h1>Hello, world!</h1></body></html>"#
+);
 ```
 
-Get this back in the result var
+## Syntax reference
 
-```html
-<!DOCTYPE html>
-<html lang="en">
-    <head></head>
-    <body>shtml the s is silent</body>
-</html>
-```
+### HTML elements
 
-Attrs work like you would expect
+Standard HTML elements with literal or dynamic attributes:
 
 ```rust
+use shtml::{html, Component, Render};
+
+// Literal attributes
+let result = html! { <div class="container"><p>Hello</p></div> }.to_string();
+assert_eq!(result, r#"<div class="container"><p>Hello</p></div>"#);
+
+// Dynamic attributes
 let class = "flex items-center h-full";
 let result = html! { <div class=class></div> }.to_string();
-
-// <div class="flex items-center h-full"></div>
+assert_eq!(result, r#"<div class="flex items-center h-full"></div>"#);
 ```
 
-Pass in rust exprs in curlies just make sure they impl `Render`
+### Void elements
+
+Self-closing elements (`<br/>`, `<img/>`, `<input/>`, etc.) are handled automatically:
 
 ```rust
-let x = 1;
-let result = html! { <div>{x}</div> }.to_string();
-
-// <div>1</div>
+# use shtml::{html, Component, Render};
+let result = html! { <input type="text" disabled/> }.to_string();
+assert_eq!(result, r#"<input type="text" disabled/>"#);
 ```
 
-Strings get escaped
+### Boolean attributes
+
+Attributes without a value are rendered as boolean attributes:
 
 ```rust
-let x = "<script>alert(\"pwned\")</script>";
-let result = html! { <div>{x}</div> }.to_string();
-
-// <div>&lt;script&gt;alert(&quotpwned&quot)&lt;/script&gt;</div>
+# use shtml::{html, Component, Render};
+let result = html! { <input disabled/> }.to_string();
+assert_eq!(result, "<input disabled/>");
 ```
 
-Components work like jsx
+### Spread attributes
+
+Use `{..expr}` to spread a `Vec<(String, String)>` as attributes on elements or components:
+
+```rust
+# use shtml::{html, Component, Render};
+let attrs = Vec::from([("data-id".to_string(), "42".to_string())]);
+let result = html! { <div {..attrs}>content</div> }.to_string();
+assert_eq!(result, r#"<div data-id="42">content</div>"#);
+```
+
+### Expressions
+
+Embed Rust expressions with `{expr}`. The expression must implement `Render`:
+
+```rust
+# use shtml::{html, Component, Render};
+let count = 42;
+let result = html! { <span>{count}</span> }.to_string();
+assert_eq!(result, "<span>42</span>");
+
+let pi = 3.14;
+let result = html! { <span>{pi}</span> }.to_string();
+assert_eq!(result, "<span>3.14</span>");
+```
+
+### Components
+
+Components are PascalCase functions that return `Component`. Attributes are passed as function arguments in declaration order. Children are passed as an `Elements` parameter:
 
 ```rust
 #![allow(non_snake_case)]
+use shtml::{html, Component, Elements, Render};
 
+// Component with attributes
+fn Greeting(name: &str) -> Component {
+    html! { <p>Hello, {name}!</p> }
+}
+
+let result = html! { <Greeting name="world"/> }.to_string();
+assert_eq!(result, "<p>Hello, world!</p>");
+
+// Component with children
 fn HStack(elements: Elements) -> Component {
     html! { <div class="flex gap-4">{elements}</div> }
 }
 
-let component = html! {
+let result = html! {
     <HStack>
-      <div>1</div>
-      <div>2</div>
-      <div>3</div>
+        <div>1</div>
+        <div>2</div>
+        <div>3</div>
     </HStack>
 }.to_string();
+assert_eq!(result, r#"<div class="flex gap-4"><div>1</div><div>2</div><div>3</div></div>"#);
 
-// <div class="flex gap-4"><div>1</div><div>2</div><div>3</div></div>
-```
-
-Attrs with components work as well
-
-```rust
-#![allow(non_snake_case)]
-
-fn Hypermedia(target: &str) -> Component {
-    html! { <div x-target=target></div> }
-}
-
-let x = "body";
-let result = html! { <Hypermedia target=x/> }.to_string();
-
-// <div x-target="body"></div>
-```
-
-Nested components
-
-```rust
-#![allow(non_snake_case)]
-
-fn HStack(elements: Elements) -> Component {
-    html! { <div class="flex gap-4">{elements}</div> }
-}
-
-fn VStack(elements: Elements) -> Component {
-    html! { <div class="flex flex-col gap-4">{elements}</div> }
-}
-
-let component = html! {
-    <HStack>
-      <VStack>
-          <div>1</div>
-          <div>2</div>
-      </VStack>
-    </HStack>
-}.to_string();
-
-// <div class="flex gap-4"><div class="flex flex-col gap-4"><div>1</div><div>2</div></div></div>
-```
-
-Attrs + nested components
-
-```rust
-fn Heading(class: &str, els: Elements) -> Component {
-    html! { <h1 class=class>{els}</h1> }
+// Component with attributes and children
+fn Heading(class: &str, elements: Elements) -> Component {
+    html! { <h1 class=class>{elements}</h1> }
 }
 
 let result = html! {
@@ -134,41 +134,45 @@ let result = html! {
         <p>How now brown cow</p>
     </Heading>
 }.to_string();
-
-// <h1 class="text-7xl text-red-500"><p>How now brown cow</p></h1>
+assert_eq!(result, r#"<h1 class="text-7xl text-red-500"><p>How now brown cow</p></h1>"#);
 ```
 
-Fragments just pass through their children
+### Module-path components
+
+Components can be referenced by their full module path:
 
 ```rust
 #![allow(non_snake_case)]
+use shtml::{html, Component, Elements, Render};
 
-fn HStack(elements: Elements) -> Component {
-    html! { <div class="flex gap-4">{elements}</div> }
+mod ui {
+    use super::*;
+    pub fn Card(elements: Elements) -> Component {
+        html! { <div class="card">{elements}</div> }
+    }
 }
 
-fn VStack(elements: Elements) -> Component {
-    html! { <div class="flex flex-col gap-4">{elements}</div> }
-}
-
-let component = html! {
-    <HStack>
-      <>
-        <VStack>
-            <div>1</div>
-            <div>2</div>
-        </VStack>
-      </>
-    </HStack>
-}.to_string();
-
-// <div class="flex gap-4"><div class="flex flex-col gap-4"><div>1</div><div>2</div></div></div>
+let result = html! { <ui::Card><p>Hello</p></ui::Card> }.to_string();
+assert_eq!(result, r#"<div class="card"><p>Hello</p></div>"#);
 ```
 
-The `Render` trait is only implemented for `Vec<T: Render>`
+### Fragments
+
+Group elements without a wrapper using `<>...</>`:
+
+```rust
+# use shtml::{html, Component, Render};
+let result = html! { <><div>A</div><div>B</div></> }.to_string();
+assert_eq!(result, "<div>A</div><div>B</div>");
+```
+
+### Loops / iteration
+
+Use `.iter().map(...).collect::<Vec<_>>()` inside an expression block:
 
 ```rust
 #![allow(non_snake_case)]
+use shtml::{html, Component, Elements, Render};
 
 fn List(elements: Elements) -> Component {
     html! { <ul>{elements}</ul> }
@@ -179,46 +183,100 @@ fn Item(elements: Elements) -> Component {
 }
 
 let items = vec![1, 2, 3];
-
 let result = html! {
-  <List>
-    {
-      items
-        .iter()
-        .map(|i| html! {
-          <Item>{i}</Item>
-        })
-        .collect::<Vec<_>>()
-    }
-  </List>
+    <List>
+        {items.iter().map(|i| html! { <Item>{i}</Item> }).collect::<Vec<_>>()}
+    </List>
 }.to_string();
-
-// <ul><li>1</li><li>2</li><li>3</li></ul>
+assert_eq!(result, "<ul><li>1</li><li>2</li><li>3</li></ul>");
 ```
 
-# Feature flags
+### HTML escaping
 
-- chaos
-
-The `chaos` feature flag requires that you annotate all component functions with a `#[component]` macro attribute and allows you to specify any attr order:
+String content (`&str`, `String`) is automatically HTML-escaped. `Component` values are not re-escaped since they contain already-rendered HTML:
 
 ```rust
+# use shtml::{html, Component, Render};
+let user_input = "<script>alert(\"xss\")</script>";
+let result = html! { <div>{user_input}</div> }.to_string();
+assert_eq!(result, r#"<div>&lt;script&gt;alert(&quot;xss&quot;)&lt;/script&gt;</div>"#);
+```
+
+The `escape()` function can also be used directly:
+
+```rust
+use shtml::escape;
+
+assert_eq!(escape("<b>bold</b>"), "&lt;b&gt;bold&lt;/b&gt;");
+assert_eq!(escape("no special chars"), "no special chars"); // zero-alloc
+```
+
+Characters escaped: `<` `>` `&` `"` `'`
+
+## `Render` trait
+
+The core abstraction for types that can be rendered inside `html!`. Any expression in `{...}` must implement `Render`.
+
+### Built-in implementations
+
+| Type | Behavior |
+|------|----------|
+| `&str`, `String` | HTML-escaped via `escape()` |
+| `Component` | Appended as-is (already rendered) |
+| Integer types (`u8`, `i8`, `u16`, `i16`, `i32`, `u32`, `i64`, `u64`, `usize`, `isize`) | Formatted via `itoa` (no allocation) |
+| `f32`, `f64` | Formatted via `ryu` (no allocation) |
+| `Vec<T: Render>` | Each element rendered sequentially |
+| `Vec<(T, T)>` | Rendered as HTML attribute pairs (` key="value"`) |
+
+### Custom implementations
+
+```rust
+use shtml::{html, Component, Render};
+
+struct User { name: String }
+
+impl Render for User {
+    fn render_to_string(&self, buffer: &mut String) {
+        buffer.push_str(&shtml::escape(&self.name));
+    }
+}
+
+let user = User { name: "Alice".into() };
+let result = html! { <span>{user}</span> }.to_string();
+assert_eq!(result, "<span>Alice</span>");
+```
+
+## Feature flags
+
+### `chaos`
+
+The `chaos` feature enables the `#[component]` attribute macro, which transforms component functions into structs. This allows attributes to be passed in any order:
+
+```rust,ignore
+use shtml::{html, component, Component, Render};
+
 #[component]
 fn Chaos(a: &str, b: u8, c: String) -> Component {
     html! { <div a=a b=b c=c></div> }
 }
+
+// Attributes in any order:
 let result = html! { <Chaos b=0 c="c".into() a="a"/> }.to_string();
-
-// <div a="a" b="0" c="c"></div>
-
-// without the chaos feature flag you need to specify the attrs
-// in the same order as the fn args
-html! {
-    <Chaos a="a" b=0 c="c".into() />
-}
+assert_eq!(result, r#"<div a="a" b="0" c="c"></div>"#);
 ```
 
-# Tips and tricks
+Without `chaos`, attributes must match the function parameter order:
+
+```rust
+# #![allow(non_snake_case)]
+# use shtml::{html, Component, Render};
+# fn Chaos(a: &str, b: u8, c: String) -> Component {
+#     html! { <div a=a b=b c=c></div> }
+# }
+let result = html! { <Chaos a="a" b=0 c="c".into()/> }.to_string();
+```
+
+## Tips and tricks
 
 - [leptosfmt](https://github.com/bram209/leptosfmt) with this override `rustfmt = { overrideCommand = ["leptosfmt", "--stdin", "--rustfmt", "--override-macro-names", "html"] }`
 - [tree-sitter-rstml](https://github.com/rayliwell/tree-sitter-rstml) for html autocomplete inside of html! macros

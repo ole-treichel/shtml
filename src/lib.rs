@@ -1,3 +1,69 @@
+//! # shtml
+//!
+//! Server-side HTML rendering for Rust using a JSX-like macro syntax.
+//!
+//! `shtml` is a `no_std` crate (using `alloc`) that lets you write HTML templates
+//! directly in Rust with the [`html!`] macro. It supports HTML elements, components,
+//! attributes, expressions, fragments, and automatic HTML escaping.
+//!
+//! # Quick start
+//!
+//! ```
+//! use shtml::{html, Component, Elements, Render};
+//!
+//! let page = html! {
+//!     <!DOCTYPE html>
+//!     <html lang="en">
+//!         <head><title>My Page</title></head>
+//!         <body><h1>Hello, world!</h1></body>
+//!     </html>
+//! };
+//!
+//! assert_eq!(
+//!     page.to_string(),
+//!     r#"<!DOCTYPE html><html lang="en"><head><title>My Page</title></head><body><h1>Hello, world!</h1></body></html>"#
+//! );
+//! ```
+//!
+//! # Components
+//!
+//! Components are PascalCase functions that return [`Component`]. They receive typed
+//! attributes as parameters and optionally an [`Elements`] parameter for children:
+//!
+//! ```
+//! # #![allow(non_snake_case)]
+//! # use shtml::{html, Component, Elements, Render};
+//! # #[cfg(not(feature = "chaos"))]
+//! # fn run() {
+//! fn Greeting(name: &str) -> Component {
+//!     html! { <p>{name}</p> }
+//! }
+//!
+//! let result = html! { <Greeting name="world"/> }.to_string();
+//! assert_eq!(result, "<p>world</p>");
+//! # }
+//! # #[cfg(feature = "chaos")]
+//! # fn run() {}
+//! # run();
+//! ```
+//!
+//! # HTML escaping
+//!
+//! String content is automatically HTML-escaped inside [`html!`]. Already-rendered
+//! [`Component`] values are not re-escaped. Use [`escape()`] directly if needed.
+//!
+//! ```
+//! # use shtml::{html, Component, Render};
+//! let user_input = "<script>alert('xss')</script>";
+//! let safe = html! { <div>{user_input}</div> }.to_string();
+//! assert_eq!(safe, "<div>&lt;script&gt;alert(&#39;xss&#39;)&lt;/script&gt;</div>");
+//! ```
+//!
+//! # Feature flags
+//!
+//! - **`chaos`** — Enables the [`component`] attribute macro, which transforms component
+//!   functions into structs allowing attributes to be passed in any order.
+
 #![allow(non_snake_case)]
 #![no_std]
 
@@ -5,6 +71,157 @@ extern crate alloc;
 use alloc::{borrow::Cow, string::String, vec::Vec};
 use core::fmt;
 
+/// A JSX-like macro for writing HTML templates in Rust.
+///
+/// The `html!` macro parses a JSX-like syntax and produces a [`Component`] containing
+/// the rendered HTML string.
+///
+/// # Syntax
+///
+/// ## HTML elements
+///
+/// Standard HTML elements with attributes:
+///
+/// ```
+/// # use shtml::{html, Component, Render};
+/// let result = html! { <div class="container"><p>Hello</p></div> }.to_string();
+/// assert_eq!(result, r#"<div class="container"><p>Hello</p></div>"#);
+/// ```
+///
+/// ## Void elements
+///
+/// Self-closing elements (`<br/>`, `<img/>`, `<input/>`, etc.) are handled automatically:
+///
+/// ```
+/// # use shtml::{html, Component, Render};
+/// let result = html! { <input type="text" disabled/> }.to_string();
+/// assert_eq!(result, r#"<input type="text" disabled/>"#);
+/// ```
+///
+/// ## Dynamic attributes
+///
+/// Attribute values can be expressions (without curlies):
+///
+/// ```
+/// # use shtml::{html, Component, Render};
+/// let class = "flex items-center";
+/// let result = html! { <div class=class></div> }.to_string();
+/// assert_eq!(result, r#"<div class="flex items-center"></div>"#);
+/// ```
+///
+/// ## Boolean attributes
+///
+/// Attributes without a value are rendered as boolean attributes:
+///
+/// ```
+/// # use shtml::{html, Component, Render};
+/// let result = html! { <input disabled/> }.to_string();
+/// assert_eq!(result, "<input disabled/>");
+/// ```
+///
+/// ## Spread attributes
+///
+/// Use `{..expr}` to spread a `Vec<(String, String)>` as attributes:
+///
+/// ```
+/// # use shtml::{html, Component, Render};
+/// # use std::vec::Vec;
+/// let attrs = Vec::from([("data-id".to_string(), "42".to_string())]);
+/// let result = html! { <div {..attrs}>content</div> }.to_string();
+/// assert_eq!(result, r#"<div data-id="42">content</div>"#);
+/// ```
+///
+/// ## Expressions
+///
+/// Embed Rust expressions with `{expr}`. The expression must implement [`Render`]:
+///
+/// ```
+/// # use shtml::{html, Component, Render};
+/// let count = 42;
+/// let result = html! { <span>{count}</span> }.to_string();
+/// assert_eq!(result, "<span>42</span>");
+/// ```
+///
+/// ## Components
+///
+/// PascalCase names are treated as component function calls. Attributes are passed
+/// as function arguments in declaration order. Children are passed as an [`Elements`]
+/// parameter:
+///
+/// ```
+/// # #![allow(non_snake_case)]
+/// # use shtml::{html, Component, Elements, Render};
+/// # #[cfg(not(feature = "chaos"))]
+/// # fn run() {
+/// fn Card(title: &str, elements: Elements) -> Component {
+///     html! { <div class="card"><h2>{title}</h2>{elements}</div> }
+/// }
+///
+/// let result = html! { <Card title="Info"><p>Details here</p></Card> }.to_string();
+/// assert_eq!(result, r#"<div class="card"><h2>Info</h2><p>Details here</p></div>"#);
+/// # }
+/// # #[cfg(feature = "chaos")]
+/// # fn run() {}
+/// # run();
+/// ```
+///
+/// ## Module-path components
+///
+/// Components can be referenced by their module path:
+///
+/// ```
+/// # #![allow(non_snake_case)]
+/// # use shtml::{html, Component, Elements, Render};
+/// # #[cfg(not(feature = "chaos"))]
+/// # fn run() {
+/// mod ui {
+///     use shtml::{html, Component, Elements, Render};
+///     pub fn Badge(elements: Elements) -> Component {
+///         html! { <span class="badge">{elements}</span> }
+///     }
+/// }
+///
+/// let result = html! { <ui::Badge>New</ui::Badge> }.to_string();
+/// assert_eq!(result, r#"<span class="badge">New</span>"#);
+/// # }
+/// # #[cfg(feature = "chaos")]
+/// # fn run() {}
+/// # run();
+/// ```
+///
+/// ## Fragments
+///
+/// Group elements without a wrapper using `<>...</>`:
+///
+/// ```
+/// # use shtml::{html, Component, Render};
+/// let result = html! { <><div>A</div><div>B</div></> }.to_string();
+/// assert_eq!(result, "<div>A</div><div>B</div>");
+/// ```
+///
+/// ## DOCTYPE and comments
+///
+/// ```
+/// # use shtml::{html, Component, Render};
+/// let result = html! { <!DOCTYPE html><html></html> }.to_string();
+/// assert_eq!(result, "<!DOCTYPE html><html></html>");
+/// ```
+///
+/// ## Loops / iteration
+///
+/// Use `.iter().map(...).collect::<Vec<_>>()` inside an expression block:
+///
+/// ```
+/// # #![allow(non_snake_case)]
+/// # use shtml::{html, Component, Elements, Render};
+/// let items = vec![1, 2, 3];
+/// let result = html! {
+///     <ul>
+///         {items.iter().map(|i| html! { <li>{i}</li> }).collect::<Vec<_>>()}
+///     </ul>
+/// }.to_string();
+/// assert_eq!(result, "<ul><li>1</li><li>2</li><li>3</li></ul>");
+/// ```
 pub use shtml_macros::html;
 
 #[cfg(not(feature = "chaos"))]
@@ -387,13 +604,100 @@ mod tests {
     }
 }
 
+/// A type alias for [`Component`], used as the parameter type for component children.
+///
+/// When a component accepts children (content placed between its opening and closing tags),
+/// it declares an `elements: Elements` parameter. The macro automatically collects and
+/// renders the children into a `Component` and passes it as this argument.
+///
+/// # Example
+///
+/// ```
+/// # #![allow(non_snake_case)]
+/// # use shtml::{html, Component, Elements, Render};
+/// # #[cfg(not(feature = "chaos"))]
+/// # fn run() {
+/// fn Wrapper(elements: Elements) -> Component {
+///     html! { <div class="wrapper">{elements}</div> }
+/// }
+///
+/// let result = html! {
+///     <Wrapper>
+///         <p>Child content</p>
+///     </Wrapper>
+/// }.to_string();
+/// assert_eq!(result, r#"<div class="wrapper"><p>Child content</p></div>"#);
+/// # }
+/// # #[cfg(feature = "chaos")]
+/// # fn run() {}
+/// # run();
+/// ```
 pub type Elements = Component;
 
+/// A rendered HTML string.
+///
+/// `Component` is the primary output type of the [`html!`] macro. It wraps a `String`
+/// containing pre-rendered HTML. When a `Component` is embedded inside another [`html!`]
+/// call, its content is inserted as-is without re-escaping.
+///
+/// # Creating a `Component`
+///
+/// Components are created via the [`html!`] macro:
+///
+/// ```
+/// # use shtml::{html, Component, Render};
+/// let component = html! { <h1>Hello</h1> };
+/// assert_eq!(component.to_string(), "<h1>Hello</h1>");
+/// ```
+///
+/// # Fields
+///
+/// - `html` — The rendered HTML string, accessible directly.
+///
+/// # Trait implementations
+///
+/// - [`Display`](core::fmt::Display) — Outputs the HTML string.
+/// - [`Render`] — Appends the HTML to a buffer without escaping (already rendered).
+/// - [`Clone`], [`Debug`], [`PartialEq`], [`Eq`]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Component {
     pub html: String,
 }
 
+/// The core trait for types that can be rendered inside [`html!`].
+///
+/// Any expression used inside `{...}` in the `html!` macro must implement `Render`.
+/// The [`render_to_string`](Render::render_to_string) method appends the rendered
+/// representation to the given buffer.
+///
+/// # Built-in implementations
+///
+/// | Type | Behavior |
+/// |------|----------|
+/// | `&str`, `String` | HTML-escaped via [`escape()`] |
+/// | `Component` | Appended as-is (already rendered) |
+/// | Integer types (`u8`, `i32`, `usize`, etc.) | Formatted via [`itoa`] |
+/// | `f32`, `f64` | Formatted via [`ryu`] |
+/// | `Vec<T: Render>` | Each element rendered sequentially |
+/// | `Vec<(T, T)>` | Rendered as HTML attribute pairs (`key="value"`) |
+///
+/// # Implementing `Render` for a custom type
+///
+/// ```
+/// # use shtml::{html, Component, Render};
+/// struct User { name: String }
+///
+/// impl Render for User {
+///     fn render_to_string(&self, buffer: &mut String) {
+///         // Escape user-provided content for safety
+///         buffer.push_str(&shtml::escape(&self.name));
+///     }
+/// }
+///
+/// let user = User { name: "Alice".into() };
+/// let result = html! { <span>{user}</span> }.to_string();
+/// assert_eq!(result, "<span>Alice</span>");
+/// ```
 pub trait Render {
     fn render_to_string(&self, buffer: &mut String);
 }
@@ -483,6 +787,29 @@ impl fmt::Display for Component {
     }
 }
 
+/// Escapes HTML special characters in a string.
+///
+/// Replaces the following characters with their HTML entity equivalents:
+///
+/// | Character | Entity |
+/// |-----------|--------|
+/// | `<` | `&lt;` |
+/// | `>` | `&gt;` |
+/// | `&` | `&amp;` |
+/// | `"` | `&quot;` |
+/// | `'` | `&#39;` |
+///
+/// Returns a [`Cow<str>`] — if no escaping is needed, the original string is returned
+/// without allocation.
+///
+/// # Example
+///
+/// ```
+/// use shtml::escape;
+///
+/// assert_eq!(escape("<b>bold</b>"), "&lt;b&gt;bold&lt;/b&gt;");
+/// assert_eq!(escape("no special chars"), "no special chars"); // no allocation
+/// ```
 pub fn escape<'a, S: Into<Cow<'a, str>>>(input: S) -> Cow<'a, str> {
     let input = input.into();
     fn needs_escaping(c: char) -> bool {
@@ -509,6 +836,28 @@ pub fn escape<'a, S: Into<Cow<'a, str>>>(input: S) -> Cow<'a, str> {
     }
 }
 
+/// An attribute macro that transforms a component function into a struct, allowing
+/// attributes to be passed in any order.
+///
+/// Without `#[component]`, attributes must be passed in the same order as the function
+/// parameters. With `#[component]`, the macro generates a struct with named fields,
+/// so attributes can be specified in any order.
+///
+/// Requires the `chaos` feature flag.
+///
+/// # Example
+///
+/// ```ignore
+/// use shtml::{html, component, Component, Render};
+///
+/// #[component]
+/// fn Button(label: &str, disabled: u8) -> Component {
+///     html! { <button disabled=disabled>{label}</button> }
+/// }
+///
+/// // Attributes in any order:
+/// let result = html! { <Button disabled=0 label="Click"/> }.to_string();
+/// ```
 #[cfg(feature = "chaos")]
 pub use shtml_macros::component;
 
