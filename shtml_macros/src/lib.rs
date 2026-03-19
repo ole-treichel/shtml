@@ -7,6 +7,10 @@ use rstml::{self, node::Node, Parser, ParserConfig};
 use std::{collections::HashSet, fmt::Debug};
 use syn::{parse_macro_input, Ident, ItemFn, LitStr, Result};
 
+/// A JSX-like macro for writing HTML templates in Rust.
+///
+/// See the [`shtml`](https://docs.rs/shtml) crate documentation for full syntax
+/// reference and examples.
 #[proc_macro]
 pub fn html(input: TokenStream) -> TokenStream {
     match html_macro(input) {
@@ -313,6 +317,12 @@ impl Output {
     }
 }
 
+/// Transforms a component function into a struct with named fields.
+///
+/// This allows component attributes to be passed in any order in the [`html!`] macro,
+/// rather than requiring them to match the function parameter order.
+///
+/// Requires the `chaos` feature flag on the `shtml` crate.
 #[proc_macro_attribute]
 pub fn component(_args: TokenStream, input: TokenStream) -> TokenStream {
     let item_fn = parse_macro_input!(input as ItemFn);
