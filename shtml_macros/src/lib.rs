@@ -36,9 +36,9 @@ fn html_macro(input: TokenStream) -> Result<TokenStream2> {
         static_string: String::new(),
         tokens: vec![],
     };
-    nodes
-        .into_iter()
-        .for_each(|node| render(&mut output, &node));
+    for node in &nodes {
+        render(&mut output, node)?;
+    }
 
     let tokens = output.to_token_stream();
 
@@ -51,7 +51,7 @@ fn html_macro(input: TokenStream) -> Result<TokenStream2> {
     })
 }
 
-fn render(output: &mut Output, node: &Node) {
+fn render(output: &mut Output, node: &Node) -> Result<()> {
     match node {
         Node::Comment(c) => {
             output.push_str("<!--");
@@ -67,7 +67,7 @@ fn render(output: &mut Output, node: &Node) {
         }
         Node::Fragment(n) => {
             for node in &n.children {
-                render(output, &node)
+                render(output, node)?;
             }
         }
         Node::Element(n) => {
@@ -96,10 +96,21 @@ fn render(output: &mut Output, node: &Node) {
                     if is_custom_element {
                         None
                     } else {
-                        todo!()
+                        return Err(syn::Error::new_spanned(
+                            punctuated,
+                            format!(
+                                "Unsupported element name `{}`. Punctuated element names are only supported for custom elements (e.g., `<my-element>`). Module-path components should use `::` syntax (e.g., `<module::Component>`).",
+                                punctuated.to_token_stream()
+                            ),
+                        ));
                     }
                 },
-                rstml::node::NodeName::Block(_) => todo!(),
+                rstml::node::NodeName::Block(_) => {
+                    return Err(syn::Error::new(
+                        Span::call_site(),
+                        "Block expressions as element names are not supported. Use a component function or a regular HTML element name.",
+                    ));
+                }
             };
 
             match component_name {
@@ -142,7 +153,7 @@ fn render(output: &mut Output, node: &Node) {
                     let mut inner_output = Output::new(output.buf.clone());
 
                     for node in &n.children {
-                        render(&mut inner_output, &node);
+                        render(&mut inner_output, node)?;
                     }
 
                     let buf = inner_output.buf.clone();
@@ -242,7 +253,7 @@ fn render(output: &mut Output, node: &Node) {
                         false => {
                             output.push_str(">");
                             for child in &n.children {
-                                render(output, &child);
+                                render(output, child)?;
                             }
 
                             match &n.close_tag {
@@ -267,6 +278,7 @@ fn render(output: &mut Output, node: &Node) {
         Node::Text(n) => output.push_str(&n.value_string()),
         Node::RawText(n) => output.push_str(&n.to_token_stream_string()),
     }
+    Ok(())
 }
 
 #[derive(Debug)]

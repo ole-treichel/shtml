@@ -1,5 +1,5 @@
 use proc_macro2::{Span, TokenStream as TokenStream2};
-use quote::quote;
+use quote::{quote, ToTokens};
 use syn::{Ident, ItemFn, Lifetime, PatType, Result, Signature, Type, TypeReference};
 
 pub fn component_macro(item_fn: ItemFn) -> Result<TokenStream2> {
@@ -17,10 +17,20 @@ pub fn component_macro(item_fn: ItemFn) -> Result<TokenStream2> {
         // TODO verify output type
         ..
     } = sig;
+    // Check for `self` receiver early
+    for arg in &inputs {
+        if let syn::FnArg::Receiver(receiver) = arg {
+            return Err(syn::Error::new_spanned(
+                receiver,
+                "Component functions cannot use `self`. Define components as free functions: `fn MyComponent(attr: Type) -> Component`.",
+            ));
+        }
+    }
+
     let field_names = inputs
         .iter()
         .map(|fn_arg| match fn_arg {
-            syn::FnArg::Receiver(_) => unimplemented!(),
+            syn::FnArg::Receiver(_) => unreachable!(),
             syn::FnArg::Typed(pat_type) => &pat_type.pat,
         })
         .collect::<Vec<_>>();
@@ -29,15 +39,21 @@ pub fn component_macro(item_fn: ItemFn) -> Result<TokenStream2> {
         .iter()
         .enumerate()
         .map(|(i, fn_arg)| match fn_arg {
-            syn::FnArg::Receiver(_) => unimplemented!(),
+            syn::FnArg::Receiver(_) => unreachable!(),
             syn::FnArg::Typed(PatType { pat, ty, .. }) => match &**ty {
-                Type::Path(type_path) => (None, quote! { #pat: #type_path }),
+                Type::Path(type_path) => Ok((None, quote! { #pat: #type_path })),
                 Type::Reference(TypeReference {
                     and_token,
                     lifetime,
                     mutability,
                     elem,
                 }) => {
+                    if i > 25 {
+                        return Err(syn::Error::new_spanned(
+                            ty,
+                            "Component functions support at most 26 reference parameters.",
+                        ));
+                    }
                     let lifetime = match lifetime {
                         Some(lifetime) => lifetime.to_owned(),
                         None => Lifetime {
@@ -49,15 +65,21 @@ pub fn component_macro(item_fn: ItemFn) -> Result<TokenStream2> {
                         },
                     };
 
-                    (
+                    Ok((
                         Some(lifetime.clone()),
                         quote! { #pat: #and_token #lifetime #mutability #elem },
-                    )
+                    ))
                 }
-                _ => unimplemented!(),
+                _ => Err(syn::Error::new_spanned(
+                    ty,
+                    format!(
+                        "Unsupported parameter type for `{}`. Component parameters must be concrete types or references (e.g., `String`, `&str`). Tuple types, trait objects, and function pointers are not supported.",
+                        pat.to_token_stream()
+                    ),
+                )),
             },
         })
-        .collect::<Vec<_>>();
+        .collect::<Result<Vec<_>>>()?;
 
     let lifetime_tokens = fields
         .iter()
