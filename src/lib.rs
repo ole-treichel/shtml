@@ -68,6 +68,8 @@
 #![no_std]
 
 extern crate alloc;
+#[cfg(feature = "once")]
+extern crate std;
 use alloc::{borrow::Cow, string::String, vec::Vec};
 use core::fmt;
 
@@ -888,5 +890,194 @@ mod tests {
         let result = html! { <Chaos c="c".into() b=0/> }.to_string();
 
         assert_eq!(result, r#"<div c="c" b="0"></div>"#);
+    }
+}
+
+/// Render-once primitives. Enable with the `once` cargo feature.
+///
+/// Inspired by [templ's render-once](https://templ.guide/syntax-and-usage/render-once):
+/// a `<script>` or `<style>` carried inside a reusable component is emitted
+/// only the first time the component is rendered within a given scope.
+///
+/// Component authors call `.once(...)` on a `static OnceHandle` with no extra
+/// arguments. The top-level caller wraps the page render in [`once_scope`].
+///
+/// ```
+/// # #![allow(non_snake_case)]
+/// # use shtml::{html, once_scope, Component, OnceHandle, Render};
+/// static SCRIPT: OnceHandle = OnceHandle::new();
+///
+/// fn Hello(name: &str) -> Component {
+///     html! {
+///         {SCRIPT.once(|| html! { <script>{"alert('hi')"}</script> })}
+///         <div>{name}</div>
+///     }
+/// }
+///
+/// let page = once_scope(|| html! {
+///     <body>
+///         <Hello name="Alice"/>
+///         <Hello name="Bob"/>
+///     </body>
+/// }).to_string();
+///
+/// assert_eq!(page.matches("<script>").count(), 1);
+/// ```
+#[cfg(feature = "once")]
+mod once_mod {
+    use crate::Component;
+    use alloc::collections::BTreeSet;
+    use alloc::string::String;
+    use alloc::vec::Vec;
+    use core::cell::RefCell;
+
+    std::thread_local! {
+        static ONCE_STATE: RefCell<Vec<BTreeSet<usize>>> = const { RefCell::new(Vec::new()) };
+    }
+
+    /// Identifies a chunk of HTML to emit at most once per [`once_scope`].
+    ///
+    /// Must be declared as a `static` — the `&'static self` receiver on
+    /// [`OnceHandle::once`] makes any other use a compile error. The handle's
+    /// address is its identity.
+    pub struct OnceHandle {
+        _priv: (),
+    }
+
+    impl OnceHandle {
+        pub const fn new() -> Self {
+            Self { _priv: () }
+        }
+
+        /// Within an active [`once_scope`], invokes `f` and returns its
+        /// [`Component`] the first time this handle is seen; subsequent calls
+        /// in the same scope return an empty Component without invoking `f`.
+        ///
+        /// Outside any scope, always invokes `f` (no dedup).
+        pub fn once<F>(&'static self, f: F) -> Component
+        where
+            F: FnOnce() -> Component,
+        {
+            let id = self as *const _ as usize;
+            let already_seen = ONCE_STATE.with(|s| {
+                let mut s = s.borrow_mut();
+                match s.last_mut() {
+                    Some(top) => !top.insert(id),
+                    None => false,
+                }
+            });
+            if already_seen {
+                Component { html: String::new() }
+            } else {
+                f()
+            }
+        }
+    }
+
+    struct ScopeGuard;
+    impl Drop for ScopeGuard {
+        fn drop(&mut self) {
+            ONCE_STATE.with(|s| {
+                s.borrow_mut().pop();
+            });
+        }
+    }
+
+    /// Runs `f` in a fresh render-once scope. Within `f`, each [`OnceHandle`]
+    /// emits its content at most once. Scopes nest correctly: an inner scope
+    /// has its own independent dedup set.
+    pub fn once_scope<T, F: FnOnce() -> T>(f: F) -> T {
+        ONCE_STATE.with(|s| s.borrow_mut().push(BTreeSet::new()));
+        let _g = ScopeGuard;
+        f()
+    }
+}
+
+#[cfg(feature = "once")]
+pub use once_mod::{once_scope, OnceHandle};
+
+#[cfg(all(test, feature = "once", not(feature = "chaos")))]
+mod once_tests {
+    use super::*;
+    use alloc::string::ToString;
+    use core::cell::Cell;
+
+    static SCRIPT: OnceHandle = OnceHandle::new();
+    static STYLE: OnceHandle = OnceHandle::new();
+
+    fn hello(name: &str) -> Component {
+        html! {
+            {SCRIPT.once(|| html! { <script>{"x"}</script> })}
+            <div>{name}</div>
+        }
+    }
+
+    #[test]
+    fn emits_once_within_scope() {
+        let page = once_scope(|| {
+            html! { <body>{hello("A")}{hello("B")}</body> }
+        })
+        .to_string();
+        assert_eq!(page.matches("<script>").count(), 1);
+        assert!(page.contains("<div>A</div>"));
+        assert!(page.contains("<div>B</div>"));
+    }
+
+    #[test]
+    fn separate_scopes_each_emit() {
+        let p1 = once_scope(|| hello("A")).to_string();
+        let p2 = once_scope(|| hello("B")).to_string();
+        assert!(p1.contains("<script>"));
+        assert!(p2.contains("<script>"));
+    }
+
+    #[test]
+    fn closure_not_invoked_twice() {
+        let calls = Cell::new(0u32);
+        once_scope(|| {
+            let _ = SCRIPT.once(|| {
+                calls.set(calls.get() + 1);
+                html! { <i></i> }
+            });
+            let _ = SCRIPT.once(|| {
+                calls.set(calls.get() + 1);
+                html! { <i></i> }
+            });
+        });
+        assert_eq!(calls.get(), 1);
+    }
+
+    #[test]
+    fn nested_scopes_each_emit_once() {
+        let out = once_scope(|| {
+            let outer = SCRIPT.once(|| html! { <script>{"o"}</script> }).to_string();
+            let inner = once_scope(|| {
+                SCRIPT.once(|| html! { <script>{"i"}</script> }).to_string()
+            });
+            let outer_again = SCRIPT.once(|| html! { <script>{"x"}</script> }).to_string();
+            alloc::format!("{}{}{}", outer, inner, outer_again)
+        });
+        assert_eq!(out.matches("<script>").count(), 2);
+        assert!(out.contains("o"));
+        assert!(out.contains("i"));
+    }
+
+    #[test]
+    fn distinct_handles_independent() {
+        let out = once_scope(|| {
+            let a = SCRIPT.once(|| html! { <script></script> }).to_string();
+            let b = STYLE.once(|| html! { <style></style> }).to_string();
+            alloc::format!("{}{}", a, b)
+        });
+        assert!(out.contains("<script>"));
+        assert!(out.contains("<style>"));
+    }
+
+    #[test]
+    fn outside_scope_always_emits() {
+        let a = SCRIPT.once(|| html! { <script></script> }).to_string();
+        let b = SCRIPT.once(|| html! { <script></script> }).to_string();
+        assert!(a.contains("<script>"));
+        assert!(b.contains("<script>"));
     }
 }

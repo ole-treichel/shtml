@@ -11,3 +11,4 @@ ryu = "1.0"
 
 [features]
 chaos = ["shtml_macros/chaos"]
+once = []
