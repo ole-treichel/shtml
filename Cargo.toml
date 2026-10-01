@@ -8,6 +8,8 @@ resolver = "2"
 shtml_macros = { path = "shtml_macros" }
 itoa = "1.0"
 ryu = "1.0"
+axum = { version = "0.8.9", default-features = false, optional = true }
 
 [features]
 chaos = ["shtml_macros/chaos"]
+axum = ["dep:axum"]

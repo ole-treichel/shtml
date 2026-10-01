@@ -63,6 +63,8 @@
 //!
 //! - **`chaos`** — Enables the [`component`] attribute macro, which transforms component
 //!   functions into structs allowing attributes to be passed in any order.
+//! - **`axum`** — Implements `axum::response::IntoResponse` for [`Component`], so a
+//!   [`view!`] can be returned directly from a handler as a `text/html` response.
 
 #![allow(non_snake_case)]
 #![no_std]
@@ -781,6 +783,29 @@ where
             value.render_to_string(buffer);
             buffer.push_str(r#"""#);
         });
+    }
+}
+
+#[cfg(feature = "axum")]
+impl axum::response::IntoResponse for Component {
+    fn into_response(self) -> axum::response::Response {
+        axum::response::Html(self.html).into_response()
+    }
+}
+
+#[cfg(feature = "axum")]
+#[cfg(test)]
+mod axum_tests {
+    use super::*;
+    use axum::response::IntoResponse;
+
+    #[test]
+    fn it_converts_to_html_response() {
+        let response = view! { <p>hi</p> }.into_response();
+        assert_eq!(
+            response.headers()["content-type"],
+            "text/html; charset=utf-8"
+        );
     }
 }
 
