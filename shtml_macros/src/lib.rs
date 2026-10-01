@@ -341,7 +341,7 @@ impl Output {
 
 /// Transforms a component function into a struct with named fields.
 ///
-/// This allows component attributes to be passed in any order in the [`html!`] macro,
+/// This allows component attributes to be passed in any order in the `view!` macro,
 /// rather than requiring them to match the function parameter order.
 ///
 /// Requires the `chaos` feature flag on the `shtml` crate.

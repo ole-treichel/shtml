@@ -3,15 +3,15 @@
 //! Server-side HTML rendering for Rust using a JSX-like macro syntax.
 //!
 //! `shtml` is a `no_std` crate (using `alloc`) that lets you write HTML templates
-//! directly in Rust with the [`html!`] macro. It supports HTML elements, components,
+//! directly in Rust with the [`view!`] macro. It supports HTML elements, components,
 //! attributes, expressions, fragments, and automatic HTML escaping.
 //!
 //! # Quick start
 //!
 //! ```
-//! use shtml::{html, Component, Elements, Render};
+//! use shtml::{view, Component, Elements, Render};
 //!
-//! let page = html! {
+//! let page = view! {
 //!     <!DOCTYPE html>
 //!     <html lang="en">
 //!         <head><title>My Page</title></head>
@@ -32,14 +32,14 @@
 //!
 //! ```
 //! # #![allow(non_snake_case)]
-//! # use shtml::{html, Component, Elements, Render};
+//! # use shtml::{view, Component, Elements, Render};
 //! # #[cfg(not(feature = "chaos"))]
 //! # fn run() {
 //! fn Greeting(name: &str) -> Component {
-//!     html! { <p>{name}</p> }
+//!     view! { <p>{name}</p> }
 //! }
 //!
-//! let result = html! { <Greeting name="world"/> }.to_string();
+//! let result = view! { <Greeting name="world"/> }.to_string();
 //! assert_eq!(result, "<p>world</p>");
 //! # }
 //! # #[cfg(feature = "chaos")]
@@ -49,13 +49,13 @@
 //!
 //! # HTML escaping
 //!
-//! String content is automatically HTML-escaped inside [`html!`]. Already-rendered
+//! String content is automatically HTML-escaped inside [`view!`]. Already-rendered
 //! [`Component`] values are not re-escaped. Use [`escape()`] directly if needed.
 //!
 //! ```
-//! # use shtml::{html, Component, Render};
+//! # use shtml::{view, Component, Render};
 //! let user_input = "<script>alert('xss')</script>";
-//! let safe = html! { <div>{user_input}</div> }.to_string();
+//! let safe = view! { <div>{user_input}</div> }.to_string();
 //! assert_eq!(safe, "<div>&lt;script&gt;alert(&#39;xss&#39;)&lt;/script&gt;</div>");
 //! ```
 //!
@@ -73,7 +73,7 @@ use core::fmt;
 
 /// A JSX-like macro for writing HTML templates in Rust.
 ///
-/// The `html!` macro parses a JSX-like syntax and produces a [`Component`] containing
+/// The `view!` macro parses a JSX-like syntax and produces a [`Component`] containing
 /// the rendered HTML string.
 ///
 /// # Syntax
@@ -83,8 +83,8 @@ use core::fmt;
 /// Standard HTML elements with attributes:
 ///
 /// ```
-/// # use shtml::{html, Component, Render};
-/// let result = html! { <div class="container"><p>Hello</p></div> }.to_string();
+/// # use shtml::{view, Component, Render};
+/// let result = view! { <div class="container"><p>Hello</p></div> }.to_string();
 /// assert_eq!(result, r#"<div class="container"><p>Hello</p></div>"#);
 /// ```
 ///
@@ -93,8 +93,8 @@ use core::fmt;
 /// Self-closing elements (`<br/>`, `<img/>`, `<input/>`, etc.) are handled automatically:
 ///
 /// ```
-/// # use shtml::{html, Component, Render};
-/// let result = html! { <input type="text" disabled/> }.to_string();
+/// # use shtml::{view, Component, Render};
+/// let result = view! { <input type="text" disabled/> }.to_string();
 /// assert_eq!(result, r#"<input type="text" disabled/>"#);
 /// ```
 ///
@@ -103,9 +103,9 @@ use core::fmt;
 /// Attribute values can be expressions (without curlies):
 ///
 /// ```
-/// # use shtml::{html, Component, Render};
+/// # use shtml::{view, Component, Render};
 /// let class = "flex items-center";
-/// let result = html! { <div class=class></div> }.to_string();
+/// let result = view! { <div class=class></div> }.to_string();
 /// assert_eq!(result, r#"<div class="flex items-center"></div>"#);
 /// ```
 ///
@@ -114,8 +114,8 @@ use core::fmt;
 /// Attributes without a value are rendered as boolean attributes:
 ///
 /// ```
-/// # use shtml::{html, Component, Render};
-/// let result = html! { <input disabled/> }.to_string();
+/// # use shtml::{view, Component, Render};
+/// let result = view! { <input disabled/> }.to_string();
 /// assert_eq!(result, "<input disabled/>");
 /// ```
 ///
@@ -124,10 +124,10 @@ use core::fmt;
 /// Use `{..expr}` to spread a `Vec<(String, String)>` as attributes:
 ///
 /// ```
-/// # use shtml::{html, Component, Render};
+/// # use shtml::{view, Component, Render};
 /// # use std::vec::Vec;
 /// let attrs = Vec::from([("data-id".to_string(), "42".to_string())]);
-/// let result = html! { <div {..attrs}>content</div> }.to_string();
+/// let result = view! { <div {..attrs}>content</div> }.to_string();
 /// assert_eq!(result, r#"<div data-id="42">content</div>"#);
 /// ```
 ///
@@ -136,9 +136,9 @@ use core::fmt;
 /// Embed Rust expressions with `{expr}`. The expression must implement [`Render`]:
 ///
 /// ```
-/// # use shtml::{html, Component, Render};
+/// # use shtml::{view, Component, Render};
 /// let count = 42;
-/// let result = html! { <span>{count}</span> }.to_string();
+/// let result = view! { <span>{count}</span> }.to_string();
 /// assert_eq!(result, "<span>42</span>");
 /// ```
 ///
@@ -150,14 +150,14 @@ use core::fmt;
 ///
 /// ```
 /// # #![allow(non_snake_case)]
-/// # use shtml::{html, Component, Elements, Render};
+/// # use shtml::{view, Component, Elements, Render};
 /// # #[cfg(not(feature = "chaos"))]
 /// # fn run() {
 /// fn Card(title: &str, elements: Elements) -> Component {
-///     html! { <div class="card"><h2>{title}</h2>{elements}</div> }
+///     view! { <div class="card"><h2>{title}</h2>{elements}</div> }
 /// }
 ///
-/// let result = html! { <Card title="Info"><p>Details here</p></Card> }.to_string();
+/// let result = view! { <Card title="Info"><p>Details here</p></Card> }.to_string();
 /// assert_eq!(result, r#"<div class="card"><h2>Info</h2><p>Details here</p></div>"#);
 /// # }
 /// # #[cfg(feature = "chaos")]
@@ -171,17 +171,17 @@ use core::fmt;
 ///
 /// ```
 /// # #![allow(non_snake_case)]
-/// # use shtml::{html, Component, Elements, Render};
+/// # use shtml::{view, Component, Elements, Render};
 /// # #[cfg(not(feature = "chaos"))]
 /// # fn run() {
 /// mod ui {
-///     use shtml::{html, Component, Elements, Render};
+///     use shtml::{view, Component, Elements, Render};
 ///     pub fn Badge(elements: Elements) -> Component {
-///         html! { <span class="badge">{elements}</span> }
+///         view! { <span class="badge">{elements}</span> }
 ///     }
 /// }
 ///
-/// let result = html! { <ui::Badge>New</ui::Badge> }.to_string();
+/// let result = view! { <ui::Badge>New</ui::Badge> }.to_string();
 /// assert_eq!(result, r#"<span class="badge">New</span>"#);
 /// # }
 /// # #[cfg(feature = "chaos")]
@@ -194,16 +194,16 @@ use core::fmt;
 /// Group elements without a wrapper using `<>...</>`:
 ///
 /// ```
-/// # use shtml::{html, Component, Render};
-/// let result = html! { <><div>A</div><div>B</div></> }.to_string();
+/// # use shtml::{view, Component, Render};
+/// let result = view! { <><div>A</div><div>B</div></> }.to_string();
 /// assert_eq!(result, "<div>A</div><div>B</div>");
 /// ```
 ///
 /// ## DOCTYPE and comments
 ///
 /// ```
-/// # use shtml::{html, Component, Render};
-/// let result = html! { <!DOCTYPE html><html></html> }.to_string();
+/// # use shtml::{view, Component, Render};
+/// let result = view! { <!DOCTYPE html><html></html> }.to_string();
 /// assert_eq!(result, "<!DOCTYPE html><html></html>");
 /// ```
 ///
@@ -213,15 +213,18 @@ use core::fmt;
 ///
 /// ```
 /// # #![allow(non_snake_case)]
-/// # use shtml::{html, Component, Elements, Render};
+/// # use shtml::{view, Component, Elements, Render};
 /// let items = vec![1, 2, 3];
-/// let result = html! {
+/// let result = view! {
 ///     <ul>
-///         {items.iter().map(|i| html! { <li>{i}</li> }).collect::<Vec<_>>()}
+///         {items.iter().map(|i| view! { <li>{i}</li> }).collect::<Vec<_>>()}
 ///     </ul>
 /// }.to_string();
 /// assert_eq!(result, "<ul><li>1</li><li>2</li><li>3</li></ul>");
 /// ```
+pub use shtml_macros::html as view;
+
+/// Alias of [`view!`].
 pub use shtml_macros::html;
 
 #[cfg(not(feature = "chaos"))]
@@ -614,14 +617,14 @@ mod tests {
 ///
 /// ```
 /// # #![allow(non_snake_case)]
-/// # use shtml::{html, Component, Elements, Render};
+/// # use shtml::{view, Component, Elements, Render};
 /// # #[cfg(not(feature = "chaos"))]
 /// # fn run() {
 /// fn Wrapper(elements: Elements) -> Component {
-///     html! { <div class="wrapper">{elements}</div> }
+///     view! { <div class="wrapper">{elements}</div> }
 /// }
 ///
-/// let result = html! {
+/// let result = view! {
 ///     <Wrapper>
 ///         <p>Child content</p>
 ///     </Wrapper>
@@ -636,17 +639,17 @@ pub type Elements = Component;
 
 /// A rendered HTML string.
 ///
-/// `Component` is the primary output type of the [`html!`] macro. It wraps a `String`
-/// containing pre-rendered HTML. When a `Component` is embedded inside another [`html!`]
+/// `Component` is the primary output type of the [`view!`] macro. It wraps a `String`
+/// containing pre-rendered HTML. When a `Component` is embedded inside another [`view!`]
 /// call, its content is inserted as-is without re-escaping.
 ///
 /// # Creating a `Component`
 ///
-/// Components are created via the [`html!`] macro:
+/// Components are created via the [`view!`] macro:
 ///
 /// ```
-/// # use shtml::{html, Component, Render};
-/// let component = html! { <h1>Hello</h1> };
+/// # use shtml::{view, Component, Render};
+/// let component = view! { <h1>Hello</h1> };
 /// assert_eq!(component.to_string(), "<h1>Hello</h1>");
 /// ```
 ///
@@ -664,9 +667,9 @@ pub struct Component {
     pub html: String,
 }
 
-/// The core trait for types that can be rendered inside [`html!`].
+/// The core trait for types that can be rendered inside [`view!`].
 ///
-/// Any expression used inside `{...}` in the `html!` macro must implement `Render`.
+/// Any expression used inside `{...}` in the `view!` macro must implement `Render`.
 /// The [`render_to_string`](Render::render_to_string) method appends the rendered
 /// representation to the given buffer.
 ///
@@ -684,7 +687,7 @@ pub struct Component {
 /// # Implementing `Render` for a custom type
 ///
 /// ```
-/// # use shtml::{html, Component, Render};
+/// # use shtml::{view, Component, Render};
 /// struct User { name: String }
 ///
 /// impl Render for User {
@@ -695,7 +698,7 @@ pub struct Component {
 /// }
 ///
 /// let user = User { name: "Alice".into() };
-/// let result = html! { <span>{user}</span> }.to_string();
+/// let result = view! { <span>{user}</span> }.to_string();
 /// assert_eq!(result, "<span>Alice</span>");
 /// ```
 pub trait Render {
@@ -851,33 +854,33 @@ pub fn escape<'a, S: Into<Cow<'a, str>>>(input: S) -> Cow<'a, str> {
 /// site (defaulting to `None`), or supplied as `Some(value)`.
 ///
 /// ```ignore
-/// use shtml::{html, component, Component, Render};
+/// use shtml::{view, component, Component, Render};
 ///
 /// #[component]
 /// fn Badge(text: String, count: Option<u8>) -> Component {
 ///     match count {
-///         Some(c) => html! { <span>{text}{c}</span> },
-///         None => html! { <span>{text}</span> },
+///         Some(c) => view! { <span>{text}{c}</span> },
+///         None => view! { <span>{text}</span> },
 ///     }
 /// }
 ///
 /// // Both are valid:
-/// let with = html! { <Badge text="hi".into() count=Some(5)/> }.to_string();
-/// let without = html! { <Badge text="hi".into()/> }.to_string();
+/// let with = view! { <Badge text="hi".into() count=Some(5)/> }.to_string();
+/// let without = view! { <Badge text="hi".into()/> }.to_string();
 /// ```
 ///
 /// # Example
 ///
 /// ```ignore
-/// use shtml::{html, component, Component, Render};
+/// use shtml::{view, component, Component, Render};
 ///
 /// #[component]
 /// fn Button(label: &str, disabled: u8) -> Component {
-///     html! { <button disabled=disabled>{label}</button> }
+///     view! { <button disabled=disabled>{label}</button> }
 /// }
 ///
 /// // Attributes in any order:
-/// let result = html! { <Button disabled=0 label="Click"/> }.to_string();
+/// let result = view! { <Button disabled=0 label="Click"/> }.to_string();
 /// ```
 #[cfg(feature = "chaos")]
 pub use shtml_macros::component;

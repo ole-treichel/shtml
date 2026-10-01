@@ -2,7 +2,7 @@
 
 Server-side HTML rendering for Rust using a JSX-like macro syntax. The s is silent.
 
-`shtml` is a `no_std` crate (using `alloc`) that lets you write HTML templates directly in Rust with the `html!` macro. It supports HTML elements, components, attributes, expressions, fragments, and automatic HTML escaping.
+`shtml` is a `no_std` crate (using `alloc`) that lets you write HTML templates directly in Rust with the `view!` macro. It supports HTML elements, components, attributes, expressions, fragments, and automatic HTML escaping.
 
 ## Installation
 
@@ -13,9 +13,9 @@ cargo add --git https://github.com/swlkr/shtml shtml
 ## Quick start
 
 ```rust
-use shtml::{html, Component, Elements, Render};
+use shtml::{view, Component, Elements, Render};
 
-let page = html! {
+let page = view! {
     <!DOCTYPE html>
     <html lang="en">
         <head><title>My Page</title></head>
@@ -36,15 +36,15 @@ assert_eq!(
 Standard HTML elements with literal or dynamic attributes:
 
 ```rust
-use shtml::{html, Component, Render};
+use shtml::{view, Component, Render};
 
 // Literal attributes
-let result = html! { <div class="container"><p>Hello</p></div> }.to_string();
+let result = view! { <div class="container"><p>Hello</p></div> }.to_string();
 assert_eq!(result, r#"<div class="container"><p>Hello</p></div>"#);
 
 // Dynamic attributes
 let class = "flex items-center h-full";
-let result = html! { <div class=class></div> }.to_string();
+let result = view! { <div class=class></div> }.to_string();
 assert_eq!(result, r#"<div class="flex items-center h-full"></div>"#);
 ```
 
@@ -53,8 +53,8 @@ assert_eq!(result, r#"<div class="flex items-center h-full"></div>"#);
 Self-closing elements (`<br/>`, `<img/>`, `<input/>`, etc.) are handled automatically:
 
 ```rust
-# use shtml::{html, Component, Render};
-let result = html! { <input type="text" disabled/> }.to_string();
+# use shtml::{view, Component, Render};
+let result = view! { <input type="text" disabled/> }.to_string();
 assert_eq!(result, r#"<input type="text" disabled/>"#);
 ```
 
@@ -63,8 +63,8 @@ assert_eq!(result, r#"<input type="text" disabled/>"#);
 Attributes without a value are rendered as boolean attributes:
 
 ```rust
-# use shtml::{html, Component, Render};
-let result = html! { <input disabled/> }.to_string();
+# use shtml::{view, Component, Render};
+let result = view! { <input disabled/> }.to_string();
 assert_eq!(result, "<input disabled/>");
 ```
 
@@ -73,9 +73,9 @@ assert_eq!(result, "<input disabled/>");
 Use `{..expr}` to spread a `Vec<(String, String)>` as attributes on elements or components:
 
 ```rust
-# use shtml::{html, Component, Render};
+# use shtml::{view, Component, Render};
 let attrs = Vec::from([("data-id".to_string(), "42".to_string())]);
-let result = html! { <div {..attrs}>content</div> }.to_string();
+let result = view! { <div {..attrs}>content</div> }.to_string();
 assert_eq!(result, r#"<div data-id="42">content</div>"#);
 ```
 
@@ -84,13 +84,13 @@ assert_eq!(result, r#"<div data-id="42">content</div>"#);
 Embed Rust expressions with `{expr}`. The expression must implement `Render`:
 
 ```rust
-# use shtml::{html, Component, Render};
+# use shtml::{view, Component, Render};
 let count = 42;
-let result = html! { <span>{count}</span> }.to_string();
+let result = view! { <span>{count}</span> }.to_string();
 assert_eq!(result, "<span>42</span>");
 
 let pi = 3.14;
-let result = html! { <span>{pi}</span> }.to_string();
+let result = view! { <span>{pi}</span> }.to_string();
 assert_eq!(result, "<span>3.14</span>");
 ```
 
@@ -100,22 +100,22 @@ Components are PascalCase functions that return `Component`. Attributes are pass
 
 ```rust
 #![allow(non_snake_case)]
-use shtml::{html, Component, Elements, Render};
+use shtml::{view, Component, Elements, Render};
 
 // Component with attributes
 fn Greeting(name: &str) -> Component {
-    html! { <p>Hello, {name}!</p> }
+    view! { <p>Hello, {name}!</p> }
 }
 
-let result = html! { <Greeting name="world"/> }.to_string();
+let result = view! { <Greeting name="world"/> }.to_string();
 assert_eq!(result, "<p>Hello, world!</p>");
 
 // Component with children
 fn HStack(elements: Elements) -> Component {
-    html! { <div class="flex gap-4">{elements}</div> }
+    view! { <div class="flex gap-4">{elements}</div> }
 }
 
-let result = html! {
+let result = view! {
     <HStack>
         <div>1</div>
         <div>2</div>
@@ -126,10 +126,10 @@ assert_eq!(result, r#"<div class="flex gap-4"><div>1</div><div>2</div><div>3</di
 
 // Component with attributes and children
 fn Heading(class: &str, elements: Elements) -> Component {
-    html! { <h1 class=class>{elements}</h1> }
+    view! { <h1 class=class>{elements}</h1> }
 }
 
-let result = html! {
+let result = view! {
     <Heading class="text-7xl text-red-500">
         <p>How now brown cow</p>
     </Heading>
@@ -143,16 +143,16 @@ Components can be referenced by their full module path:
 
 ```rust
 #![allow(non_snake_case)]
-use shtml::{html, Component, Elements, Render};
+use shtml::{view, Component, Elements, Render};
 
 mod ui {
     use super::*;
     pub fn Card(elements: Elements) -> Component {
-        html! { <div class="card">{elements}</div> }
+        view! { <div class="card">{elements}</div> }
     }
 }
 
-let result = html! { <ui::Card><p>Hello</p></ui::Card> }.to_string();
+let result = view! { <ui::Card><p>Hello</p></ui::Card> }.to_string();
 assert_eq!(result, r#"<div class="card"><p>Hello</p></div>"#);
 ```
 
@@ -161,8 +161,8 @@ assert_eq!(result, r#"<div class="card"><p>Hello</p></div>"#);
 Group elements without a wrapper using `<>...</>`:
 
 ```rust
-# use shtml::{html, Component, Render};
-let result = html! { <><div>A</div><div>B</div></> }.to_string();
+# use shtml::{view, Component, Render};
+let result = view! { <><div>A</div><div>B</div></> }.to_string();
 assert_eq!(result, "<div>A</div><div>B</div>");
 ```
 
@@ -172,20 +172,20 @@ Use `.iter().map(...).collect::<Vec<_>>()` inside an expression block:
 
 ```rust
 #![allow(non_snake_case)]
-use shtml::{html, Component, Elements, Render};
+use shtml::{view, Component, Elements, Render};
 
 fn List(elements: Elements) -> Component {
-    html! { <ul>{elements}</ul> }
+    view! { <ul>{elements}</ul> }
 }
 
 fn Item(elements: Elements) -> Component {
-    html! { <li>{elements}</li> }
+    view! { <li>{elements}</li> }
 }
 
 let items = vec![1, 2, 3];
-let result = html! {
+let result = view! {
     <List>
-        {items.iter().map(|i| html! { <Item>{i}</Item> }).collect::<Vec<_>>()}
+        {items.iter().map(|i| view! { <Item>{i}</Item> }).collect::<Vec<_>>()}
     </List>
 }.to_string();
 assert_eq!(result, "<ul><li>1</li><li>2</li><li>3</li></ul>");
@@ -196,9 +196,9 @@ assert_eq!(result, "<ul><li>1</li><li>2</li><li>3</li></ul>");
 String content (`&str`, `String`) is automatically HTML-escaped. `Component` values are not re-escaped since they contain already-rendered HTML:
 
 ```rust
-# use shtml::{html, Component, Render};
+# use shtml::{view, Component, Render};
 let user_input = "<script>alert(\"xss\")</script>";
-let result = html! { <div>{user_input}</div> }.to_string();
+let result = view! { <div>{user_input}</div> }.to_string();
 assert_eq!(result, r#"<div>&lt;script&gt;alert(&quot;xss&quot;)&lt;/script&gt;</div>"#);
 ```
 
@@ -215,7 +215,7 @@ Characters escaped: `<` `>` `&` `"` `'`
 
 ## `Render` trait
 
-The core abstraction for types that can be rendered inside `html!`. Any expression in `{...}` must implement `Render`.
+The core abstraction for types that can be rendered inside `view!`. Any expression in `{...}` must implement `Render`.
 
 ### Built-in implementations
 
@@ -231,7 +231,7 @@ The core abstraction for types that can be rendered inside `html!`. Any expressi
 ### Custom implementations
 
 ```rust
-use shtml::{html, Component, Render};
+use shtml::{view, Component, Render};
 
 struct User { name: String }
 
@@ -242,7 +242,7 @@ impl Render for User {
 }
 
 let user = User { name: "Alice".into() };
-let result = html! { <span>{user}</span> }.to_string();
+let result = view! { <span>{user}</span> }.to_string();
 assert_eq!(result, "<span>Alice</span>");
 ```
 
@@ -253,15 +253,15 @@ assert_eq!(result, "<span>Alice</span>");
 The `chaos` feature enables the `#[component]` attribute macro, which transforms component functions into structs. This allows attributes to be passed in any order:
 
 ```rust,ignore
-use shtml::{html, component, Component, Render};
+use shtml::{view, component, Component, Render};
 
 #[component]
 fn Chaos(a: &str, b: u8, c: String) -> Component {
-    html! { <div a=a b=b c=c></div> }
+    view! { <div a=a b=b c=c></div> }
 }
 
 // Attributes in any order:
-let result = html! { <Chaos b=0 c="c".into() a="a"/> }.to_string();
+let result = view! { <Chaos b=0 c="c".into() a="a"/> }.to_string();
 assert_eq!(result, r#"<div a="a" b="0" c="c"></div>"#);
 ```
 
@@ -269,11 +269,11 @@ Without `chaos`, attributes must match the function parameter order:
 
 ```rust
 # #![allow(non_snake_case)]
-# use shtml::{html, Component, Render};
+# use shtml::{view, Component, Render};
 # fn Chaos(a: &str, b: u8, c: String) -> Component {
-#     html! { <div a=a b=b c=c></div> }
+#     view! { <div a=a b=b c=c></div> }
 # }
-let result = html! { <Chaos a="a" b=0 c="c".into()/> }.to_string();
+let result = view! { <Chaos a="a" b=0 c="c".into()/> }.to_string();
 ```
 
 #### Optional props
@@ -282,22 +282,22 @@ With `#[component]`, a parameter of type `Option<T>` becomes an *optional prop*.
 be omitted at the call site (defaulting to `None`) or supplied as `Some(value)`:
 
 ```rust,ignore
-use shtml::{html, component, Component, Render};
+use shtml::{view, component, Component, Render};
 
 #[component]
 fn Badge(text: String, count: Option<u8>) -> Component {
     match count {
-        Some(c) => html! { <span>{text}{c}</span> },
-        None => html! { <span>{text}</span> },
+        Some(c) => view! { <span>{text}{c}</span> },
+        None => view! { <span>{text}</span> },
     }
 }
 
 // Provided:
-let result = html! { <Badge text="hi".into() count=Some(5)/> }.to_string();
+let result = view! { <Badge text="hi".into() count=Some(5)/> }.to_string();
 assert_eq!(result, r#"<span>hi5</span>"#);
 
 // Skipped (defaults to None):
-let result = html! { <Badge text="hi".into()/> }.to_string();
+let result = view! { <Badge text="hi".into()/> }.to_string();
 assert_eq!(result, r#"<span>hi</span>"#);
 ```
 
@@ -305,17 +305,17 @@ Optional props also work alongside children. In `chaos` mode the children parame
 be named `elements`:
 
 ```rust,ignore
-use shtml::{html, component, Component, Elements, Render};
+use shtml::{view, component, Component, Elements, Render};
 
 #[component]
 fn Card(title: Option<String>, elements: Elements) -> Component {
     match title {
-        Some(t) => html! { <div class="card"><h2>{t}</h2>{elements}</div> },
-        None => html! { <div class="card">{elements}</div> },
+        Some(t) => view! { <div class="card"><h2>{t}</h2>{elements}</div> },
+        None => view! { <div class="card">{elements}</div> },
     }
 }
 
-let result = html! { <Card><p>body</p></Card> }.to_string();
+let result = view! { <Card><p>body</p></Card> }.to_string();
 assert_eq!(result, r#"<div class="card"><p>body</p></div>"#);
 ```
 
@@ -327,9 +327,9 @@ lifetime the macro does not infer).
 ## Tips and tricks
 
 - [leptosfmt](https://github.com/bram209/leptosfmt) with this override `rustfmt = { overrideCommand = ["leptosfmt", "--stdin", "--rustfmt", "--override-macro-names", "html"] }`
-- [tree-sitter-rstml](https://github.com/rayliwell/tree-sitter-rstml) for html autocomplete inside of html! macros
+- [tree-sitter-rstml](https://github.com/rayliwell/tree-sitter-rstml) for html autocomplete inside of view! macros
 
-For helix users: the html! macro should just work and have correct syntax highlighting and autocomplete with the default html lsp + tailwind if that's your jam
+For helix users: the view! macro should just work and have correct syntax highlighting and autocomplete with the default html lsp + tailwind if that's your jam
 
 ```toml
 [language-server.tailwind-ls]
