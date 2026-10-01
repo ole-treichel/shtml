@@ -572,6 +572,12 @@ mod tests {
     }
 
     #[test]
+    fn it_converts_into_string() {
+        let result: String = html! { <p>hi</p> }.into();
+        assert_eq!(result, "<p>hi</p>");
+    }
+
+    #[test]
     fn it_works_with_bool_attributes() {
         let result = html! { <input disabled/> }.to_string();
         assert_eq!(result, r#"<input disabled/>"#);
@@ -662,6 +668,7 @@ pub type Elements = Component;
 /// # Trait implementations
 ///
 /// - [`Display`](core::fmt::Display) — Outputs the HTML string.
+/// - `From<Component> for String` — Moves out the HTML string without copying.
 /// - [`Render`] — Appends the HTML to a buffer without escaping (already rendered).
 /// - [`Clone`], [`Debug`], [`PartialEq`], [`Eq`]
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -806,6 +813,12 @@ mod axum_tests {
             response.headers()["content-type"],
             "text/html; charset=utf-8"
         );
+    }
+}
+
+impl From<Component> for String {
+    fn from(component: Component) -> String {
+        component.html
     }
 }
 
