@@ -65,13 +65,22 @@
 //!   functions into structs allowing attributes to be passed in any order.
 //! - **`axum`** — Implements `axum::response::IntoResponse` for [`Component`], so a
 //!   [`view!`] can be returned directly from a handler as a `text/html` response.
+//! - **`context`** — Enables the `context` module: values provided once per render
+//!   (e.g. an auth session) and read by any component, via `#[context]` props in
+//!   `chaos` mode. Requires `std`.
 
 #![allow(non_snake_case)]
 #![no_std]
 
 extern crate alloc;
+// `#[component]` emits `::shtml::...` paths; this makes them resolve in our own tests.
+#[cfg(test)]
+extern crate self as shtml;
 use alloc::{borrow::Cow, string::String, vec::Vec};
 use core::fmt;
+
+#[cfg(feature = "context")]
+pub mod context;
 
 /// A JSX-like macro for writing HTML templates in Rust.
 ///
@@ -907,6 +916,32 @@ pub fn escape<'a, S: Into<Cow<'a, str>>>(input: S) -> Cow<'a, str> {
 /// let without = view! { <Badge text="hi".into()/> }.to_string();
 /// ```
 ///
+/// # Context props
+///
+/// With the `context` feature, a parameter marked `#[context]` falls back to the value
+/// supplied by `shtml::context::provide` when it is not passed at the call site.
+/// Passing it explicitly overrides the context.
+///
+/// - `#[context] auth: Auth` — required; panics at build time if no `Auth` is provided.
+/// - `#[context] auth: Option<Auth>` — `None` if no `Auth` is provided.
+///
+/// The type must be owned and `Clone + 'static`.
+///
+/// ```ignore
+/// use shtml::{view, component, context::provide, Component, Render};
+///
+/// #[derive(Clone)]
+/// struct Auth { user: String }
+///
+/// #[component]
+/// fn UserName(#[context] auth: Auth) -> Component {
+///     view! { <span>{&auth.user}</span> }
+/// }
+///
+/// let page = provide(Auth { user: "ole".into() }, || view! { <UserName/> }.to_string());
+/// assert_eq!(page, "<span>ole</span>");
+/// ```
+///
 /// # Example
 ///
 /// ```ignore
@@ -996,5 +1031,78 @@ mod tests {
 
         let without_title = html! { <Card><p>body</p></Card> }.to_string();
         assert_eq!(without_title, r#"<div class="card"><p>body</p></div>"#);
+    }
+
+    #[cfg(feature = "context")]
+    mod context_props {
+        use super::*;
+        use crate::context::provide;
+
+        #[derive(Clone)]
+        struct Auth {
+            user: String,
+        }
+
+        #[component]
+        fn UserName(#[context] auth: Auth) -> Component {
+            html! { <span>{&auth.user}</span> }
+        }
+
+        #[component]
+        fn MaybeUser(#[context] auth: Option<Auth>) -> Component {
+            match auth {
+                Some(auth) => html! { <span>{&auth.user}</span> },
+                None => html! { <a>login</a> },
+            }
+        }
+
+        #[component]
+        fn Layout(title: String, elements: Elements) -> Component {
+            html! { <header>{title}<UserName/></header><main>{elements}</main> }
+        }
+
+        fn auth(user: &str) -> Auth {
+            Auth { user: user.to_string() }
+        }
+
+        #[test]
+        fn it_resolves_context_props_at_any_depth() {
+            let result = provide(auth("ole"), || {
+                html! { <Layout title="t".into()><UserName/></Layout> }.to_string()
+            });
+            assert_eq!(
+                result,
+                "<header>t<span>ole</span></header><main><span>ole</span></main>"
+            );
+        }
+
+        #[test]
+        fn it_prefers_explicit_context_props() {
+            let result = provide(auth("ole"), || {
+                html! { <UserName auth=auth("other")/> }.to_string()
+            });
+            assert_eq!(result, "<span>other</span>");
+
+            let result = html! { <UserName auth=auth("no-scope")/> }.to_string();
+            assert_eq!(result, "<span>no-scope</span>");
+        }
+
+        #[test]
+        fn it_resolves_optional_context_props() {
+            let result = provide(auth("ole"), || html! { <MaybeUser/> }.to_string());
+            assert_eq!(result, "<span>ole</span>");
+
+            let result = html! { <MaybeUser/> }.to_string();
+            assert_eq!(result, "<a>login</a>");
+
+            let result = provide(auth("ole"), || html! { <MaybeUser auth=None/> }.to_string());
+            assert_eq!(result, "<a>login</a>");
+        }
+
+        #[test]
+        #[should_panic(expected = "no context of type")]
+        fn it_panics_on_missing_required_context_props() {
+            html! { <UserName/> };
+        }
     }
 }

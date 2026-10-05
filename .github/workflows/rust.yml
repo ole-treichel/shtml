@@ -20,3 +20,9 @@ jobs:
       run: cargo build --verbose
     - name: Run tests
       run: cargo test --verbose
+    - name: Run tests (chaos)
+      run: cargo test --verbose --features chaos
+    - name: Run tests (context)
+      run: cargo test --verbose --features context
+    - name: Run tests (chaos + context)
+      run: cargo test --verbose --features chaos,context

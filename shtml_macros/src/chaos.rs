@@ -1,6 +1,9 @@
 use proc_macro2::{Span, TokenStream as TokenStream2};
 use quote::{quote, ToTokens};
-use syn::{Ident, ItemFn, Lifetime, PatType, Result, Signature, Type, TypeReference};
+use syn::{
+    Attribute, GenericArgument, Ident, ItemFn, Lifetime, PathArguments, PatType, Result, Signature,
+    Type, TypeReference,
+};
 
 /// Per-parameter information gathered while transforming a component function.
 struct FieldInfo {
@@ -12,16 +15,41 @@ struct FieldInfo {
     value_ty: TokenStream2,
     /// Whether the field is an `Option<T>`, i.e. a skippable optional prop.
     optional: bool,
+    /// For `#[context]` params: the function `build()` calls when the prop was not
+    /// passed (`expect_context::<T>` or, for `Option<T>`, `use_context::<T>`).
+    context: Option<TokenStream2>,
 }
 
-/// Returns `true` if the type is `Option<...>` (a skippable optional prop).
-fn is_option_type(type_path: &syn::TypePath) -> bool {
-    type_path
-        .path
-        .segments
-        .last()
-        .map(|seg| seg.ident == "Option")
-        .unwrap_or(false)
+/// Returns `T` if the type is `Option<T>`.
+fn option_inner(type_path: &syn::TypePath) -> Option<&Type> {
+    let seg = type_path.path.segments.last()?;
+    if seg.ident != "Option" {
+        return None;
+    }
+    match &seg.arguments {
+        PathArguments::AngleBracketed(args) => args.args.iter().find_map(|arg| match arg {
+            GenericArgument::Type(ty) => Some(ty),
+            _ => None,
+        }),
+        _ => None,
+    }
+}
+
+/// Returns the `#[context]` attribute of a parameter, rejecting arguments.
+fn context_attr(attrs: &[Attribute]) -> Result<Option<&Attribute>> {
+    let Some(attr) = attrs.iter().find(|attr| attr.path().is_ident("context")) else {
+        return Ok(None);
+    };
+    if !matches!(attr.meta, syn::Meta::Path(_)) {
+        return Err(syn::Error::new_spanned(attr, "`#[context]` takes no arguments."));
+    }
+    #[cfg(not(feature = "context"))]
+    return Err(syn::Error::new_spanned(
+        attr,
+        "`#[context]` requires the `context` feature: `shtml = { features = [\"chaos\", \"context\"] }`.",
+    ));
+    #[cfg(feature = "context")]
+    Ok(Some(attr))
 }
 
 pub fn component_macro(item_fn: ItemFn) -> Result<TokenStream2> {
@@ -54,7 +82,7 @@ pub fn component_macro(item_fn: ItemFn) -> Result<TokenStream2> {
         .enumerate()
         .map(|(i, fn_arg)| match fn_arg {
             syn::FnArg::Receiver(_) => unreachable!(),
-            syn::FnArg::Typed(PatType { pat, ty, .. }) => {
+            syn::FnArg::Typed(PatType { attrs, pat, ty, .. }) => {
                 let name = match &**pat {
                     syn::Pat::Ident(pat_ident) => pat_ident.ident.clone(),
                     _ => {
@@ -65,13 +93,27 @@ pub fn component_macro(item_fn: ItemFn) -> Result<TokenStream2> {
                     }
                 };
 
+                let context = context_attr(attrs)?;
+
                 match &**ty {
-                    Type::Path(type_path) => Ok(FieldInfo {
-                        lifetime: None,
-                        name,
-                        value_ty: quote! { #type_path },
-                        optional: is_option_type(type_path),
-                    }),
+                    Type::Path(type_path) => {
+                        let inner = option_inner(type_path);
+                        let context = context.map(|_| match inner {
+                            Some(inner) => quote! { ::shtml::context::use_context::<#inner> },
+                            None => quote! { ::shtml::context::expect_context::<#type_path> },
+                        });
+                        Ok(FieldInfo {
+                            lifetime: None,
+                            name,
+                            value_ty: quote! { #type_path },
+                            optional: inner.is_some() && context.is_none(),
+                            context,
+                        })
+                    }
+                    Type::Reference(_) if context.is_some() => Err(syn::Error::new_spanned(
+                        ty,
+                        "`#[context]` params must be owned types (`Clone + 'static`); the value is cloned out of the context.",
+                    )),
                     Type::Reference(TypeReference {
                         and_token,
                         lifetime,
@@ -100,6 +142,7 @@ pub fn component_macro(item_fn: ItemFn) -> Result<TokenStream2> {
                             name,
                             value_ty: quote! { #and_token #lifetime #mutability #elem },
                             optional: false,
+                            context: None,
                         })
                     }
                     _ => Err(syn::Error::new_spanned(
@@ -135,9 +178,9 @@ pub fn component_macro(item_fn: ItemFn) -> Result<TokenStream2> {
 
     let builder_ident = Ident::new(&format!("{ident}Builder"), ident.span());
 
-    // Builder fields track whether each prop was supplied. Required fields are
-    // wrapped in an extra `Option` (`None` until set); optional `Option<T>` props
-    // are stored as-is (`None` already means "skipped").
+    // Builder fields track whether each prop was supplied. Required and context
+    // fields are wrapped in an extra `Option` (`None` until set); optional
+    // `Option<T>` props are stored as-is (`None` already means "skipped").
     let builder_fields = infos.iter().map(|info| {
         let name = &info.name;
         let ty = &info.value_ty;
@@ -175,7 +218,9 @@ pub fn component_macro(item_fn: ItemFn) -> Result<TokenStream2> {
 
     let build_fields = infos.iter().map(|info| {
         let name = &info.name;
-        if info.optional {
+        if let Some(lookup) = &info.context {
+            quote! { #name: self.#name.unwrap_or_else(#lookup) }
+        } else if info.optional {
             quote! { #name: self.#name }
         } else {
             let msg = format!("missing required prop `{name}`");

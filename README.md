@@ -324,6 +324,53 @@ Non-`Option` parameters remain required; omitting one panics at build time with
 type — use `Option<String>` (a by-value `Option` holding a borrow would need a named
 lifetime the macro does not infer).
 
+### `context`
+
+The `context` feature provides values once per render (auth session, CSRF token,
+locale, ...) to every component, without passing them down as props. It requires `std`.
+
+```toml
+shtml = { features = ["chaos", "context"] }
+```
+
+Wrap the render in `provide`, and mark component params with `#[context]`:
+
+```rust,ignore
+use shtml::{view, component, context::provide, Component, Render};
+
+#[component]
+fn UserMenu(#[context] auth: AuthSession) -> Component {
+    match &auth.user {
+        Some(user) => view! { <span>{&user.name}</span> },
+        None => view! { <a href="/login">Login</a> },
+    }
+}
+
+#[component]
+fn Page() -> Component {
+    view! { <header><UserMenu/></header> }
+}
+
+// axum handler (with the `axum` feature, `Component` is a response)
+async fn home(auth: AuthSession) -> Component {
+    provide(auth, || view! { <Page/> })
+}
+```
+
+- `#[context] auth: T` — required; panics at build time if no `T` was provided.
+- `#[context] auth: Option<T>` — `None` if no `T` was provided.
+- Passing the prop explicitly (`<UserMenu auth=other/>`) overrides the context.
+- `T` must be owned and `Clone + 'static`; each lookup clones it (wrap expensive values in `Arc`).
+- Nested `provide` calls with the same type shadow the outer value. Multiple types:
+  `provide(auth, || provide(csrf, || ...))`.
+
+Without `chaos`, read the context directly with `shtml::context::use_context::<T>()`
+(returns `Option<T>`) or `expect_context::<T>()` (panics if missing).
+
+The context is thread-local and exists only while the `provide` closure runs. Rendering is
+synchronous, so this is safe in async handlers. There is no provider component: children
+are rendered before their parent, so `provide` must wrap the whole render.
+
 ## Tips and tricks
 
 - [leptosfmt](https://github.com/bram209/leptosfmt) with this override `rustfmt = { overrideCommand = ["leptosfmt", "--stdin", "--rustfmt", "--override-macro-names", "html"] }`
